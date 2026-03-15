@@ -1,0 +1,285 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from PIL import Image
+from datetime import datetime
+
+# =======================
+# Page config
+# =======================
+
+
+st.set_page_config(page_title="CFM56-7B Skywise PRO", layout="wide")
+
+st.title("CFM56-7B ENGINE HEALTH MONITORING")
+st.subheader("Skywise PRO Version - Created by Y.A. Prasetya")
+
+# =========================
+# LIMITS
+# =========================
+
+limits = {
+    "N1":102,
+    "N2":105,
+    "EGT":950,
+    "Fuel Flow":5200,
+    "Oil Temp":150,
+    "Oil Pressure":60,
+    "Vibration":4
+}
+
+# =========================
+# SESSION STORAGE
+# =========================
+
+if "data" not in st.session_state:
+    st.session_state.data = pd.DataFrame()
+
+# =========================
+# STATUS FUNCTION
+# =========================
+
+def check_status(value,limit):
+
+    caution = limit*0.95
+
+    if value > limit:
+        return "WARNING","red"
+
+    elif value >= caution:
+        return "CAUTION","orange"
+
+    else:
+        return "NORMAL","green"
+
+# =========================
+# HEALTH SCORE
+# =========================
+
+def health_score(params):
+
+    score = 100
+
+    for p,v in params.items():
+
+        limit = limits[p]
+
+        if v > limit:
+            score -= 20
+
+        elif v > limit*0.95:
+            score -= 10
+
+    if score < 0:
+        score = 0
+
+    return score
+
+# =========================
+# SIDEBAR INPUT
+# =========================
+
+st.sidebar.header("Aircraft Information")
+
+date = st.sidebar.date_input("Date",datetime.today())
+
+aircraft = st.sidebar.text_input("Aircraft Registration")
+
+engine = st.sidebar.text_input("Engine No")
+
+route = st.sidebar.text_input("Route")
+
+st.sidebar.header("Engine Start")
+
+egt_start = st.sidebar.number_input("EGT Start (°C)")
+
+if egt_start > 725:
+
+    st.sidebar.error("HOT START DETECTED")
+
+# =========================
+# TAKEOFF PARAMETERS
+# =========================
+
+st.sidebar.header("Takeoff Parameters")
+
+N1 = st.sidebar.number_input("N1 (%)")
+
+N2 = st.sidebar.number_input("N2 (%)")
+
+EGT = st.sidebar.number_input("EGT Takeoff (°C)")
+
+Fuel = st.sidebar.number_input("Fuel Flow (pph)")
+
+OilP = st.sidebar.number_input("Oil Pressure (psi)")
+
+OilT = st.sidebar.number_input("Oil Temp (°C)")
+
+Vib = st.sidebar.number_input("Vibration (ips)")
+
+params = {
+    "N1":N1,
+    "N2":N2,
+    "EGT":EGT,
+    "Fuel Flow":Fuel,
+    "Oil Pressure":OilP,
+    "Oil Temp":OilT,
+    "Vibration":Vib
+}
+
+# =========================
+# EGT MARGIN
+# =========================
+
+egt_margin = limits["EGT"] - EGT
+
+st.metric("EGT Margin (°C)",egt_margin)
+
+# =========================
+# HEALTH SCORE
+# =========================
+
+score = health_score(params)
+
+st.metric("Engine Health Score",score)
+
+# =========================
+# STATUS DISPLAY
+# =========================
+
+st.header("Engine Status")
+
+for p,v in params.items():
+
+    status,color = check_status(v,limits[p])
+
+    st.markdown(f"**{p} : {v} → :{color}[{status}]**")
+
+# =========================
+# ADD DATA
+# =========================
+
+if st.button("Add Aircraft Data"):
+
+    new_data = {
+        "Date":date,
+        "Aircraft":aircraft,
+        "Engine":engine,
+        "Route":route,
+        "EGT":EGT,
+        "Fuel Flow":Fuel,
+        "Oil Pressure":OilP,
+        "Oil Temp":OilT,
+        "Vibration":Vib,
+        "N1":N1,
+        "N2":N2,
+        "EGT Margin":egt_margin,
+        "Health Score":score
+    }
+
+    st.session_state.data = pd.concat(
+        [st.session_state.data,pd.DataFrame([new_data])],
+        ignore_index=True
+    )
+
+    st.success("Aircraft Added")
+
+# =========================
+# FLEET OVERVIEW
+# =========================
+
+st.header("Fleet Overview")
+
+if not st.session_state.data.empty:
+
+    total_aircraft = st.session_state.data["Aircraft"].nunique()
+
+    engines = len(st.session_state.data)
+
+    warning = len(st.session_state.data[st.session_state.data["Health Score"]<70])
+
+    caution = len(st.session_state.data[(st.session_state.data["Health Score"]<85) & (st.session_state.data["Health Score"]>=70)])
+
+    col1,col2,col3,col4 = st.columns(4)
+
+    col1.metric("Aircraft",total_aircraft)
+
+    col2.metric("Engines Monitored",engines)
+
+    col3.metric("Warning Engines",warning)
+
+    col4.metric("Caution Engines",caution)
+
+# =========================
+# FLEET TABLE
+# =========================
+
+st.header("Fleet Monitoring Table")
+
+if not st.session_state.data.empty:
+
+    ranking = st.session_state.data.sort_values("Health Score")
+
+    st.dataframe(ranking)
+
+# =========================
+# TREND CHART
+# =========================
+
+st.header("Engine Trend Monitoring")
+
+if not st.session_state.data.empty:
+
+    col1,col2,col3 = st.columns(3)
+
+    with col1:
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            y=st.session_state.data["EGT"],
+            mode="lines+markers",
+            name="EGT"
+        ))
+
+        st.plotly_chart(fig,use_container_width=True)
+
+    with col2:
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            y=st.session_state.data["Fuel Flow"],
+            mode="lines+markers",
+            name="Fuel Flow"
+        ))
+
+        st.plotly_chart(fig,use_container_width=True)
+
+    with col3:
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            y=st.session_state.data["Vibration"],
+            mode="lines+markers",
+            name="Vibration"
+        ))
+
+        st.plotly_chart(fig,use_container_width=True)
+
+# =========================
+# SAVE DATA
+# =========================
+
+st.header("Export")
+
+if st.button("Save CSV"):
+
+    st.session_state.data.to_csv("engine_monitoring_pro.csv",index=False)
+
+    st.success("CSV Saved")
+
+if st.button("Print Report"):
+
+    st.info("Use CTRL + P")
